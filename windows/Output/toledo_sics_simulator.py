@@ -3,6 +3,15 @@ import random
 import argparse
 import time
 import sys
+import logging
+
+# Setup logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
 
 # Simulated state
 tare_offset = 0.0
@@ -21,7 +30,6 @@ def get_unstable_weight():
 
 def process_command(cmd):
     global tare_offset
-
     cmd = cmd.strip().upper()
 
     if cmd == "SI":
@@ -48,7 +56,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        print(f"Opening {args.port} at {args.baudrate} baud...")
+        logger.info(f"Opening {args.port} at {args.baudrate} baud...")
         with serial.Serial(
             port=args.port,
             baudrate=args.baudrate,
@@ -57,22 +65,22 @@ def main():
             stopbits=serial.STOPBITS_ONE,
             timeout=1
         ) as ser:
-            print("Listening for SICS commands... Press Ctrl+C to stop.")
+            logger.info("Listening for SICS commands... Press Ctrl+C to stop.")
             while True:
                 line = ser.readline().decode().strip()
                 if line:
-                    print(f">> Received: {line}")
+                    logger.info(f">> Received: {line}")
                     response = process_command(line)
                     ser.write((response + "\r\n").encode())
-                    print(f"<< Replied:  {response}")
+                    logger.info(f"<< Replied:  {response}")
     except serial.SerialException as e:
-        print(f"[ERROR] Could not open port {args.port}: {e}")
+        logger.error(f"Could not open port {args.port}: {e}")
         sys.exit(1)
     except KeyboardInterrupt:
-        print("\nSimulator stopped.")
+        logger.info("Simulator stopped.")
         sys.exit(0)
     except Exception as e:
-        print(f"[ERROR] Unexpected error: {e}")
+        logger.exception(f"Unexpected error: {e}")
         sys.exit(1)
 
 if __name__ == '__main__':
