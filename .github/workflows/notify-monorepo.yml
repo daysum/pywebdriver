@@ -1,0 +1,46 @@
+# GitHub Actions Workflow Template for Individual Addon Repositories
+# 
+# Place this file in each addon repository as:
+# .github/workflows/notify-monorepo.yml
+#
+# This workflow triggers the monorepo sync when changes are pushed to development branch
+
+name: Notify Monorepo of Changes
+
+on:
+  push:
+    branches:
+      - development
+    paths-ignore:
+      - '**.md'
+      - '.github/**'
+
+jobs:
+  notify-monorepo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get addon name
+        id: addon-name
+        run: |
+          # Extract addon name from repository name
+          REPO_NAME="${{ github.repository }}"
+          ADDON_NAME=$(echo "$REPO_NAME" | cut -d'/' -f2 | sed 's/-/_/g')
+          echo "addon_name=$ADDON_NAME" >> $GITHUB_OUTPUT
+          echo "Repository: $REPO_NAME"
+          echo "Addon name: $ADDON_NAME"
+
+      - name: Trigger monorepo sync
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.MONOREPO_SYNC_TOKEN }}
+          repository: daysum/daysum-odoo-apps
+          event-type: addon-updated
+          client-payload: |
+            {
+              "addon_name": "${{ steps.addon-name.outputs.addon_name }}",
+              "repository": "${{ github.repository }}",
+              "commit": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}",
+              "author": "${{ github.actor }}"
+            }
+
