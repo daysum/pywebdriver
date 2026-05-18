@@ -1,0 +1,207 @@
+# GitHub Actions workflow for building and publishing this Odoo addon to AWS CodeArtifact
+# Uses whool for packaging: release tags should be PEP 440 versions with five segments
+# (e.g. v16.0.1.2.0) so __manifest__.py matches manifestoo's Odoo addon rules.
+name: Build and Publish Addon to AWS CodeArtifact
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TARGET_REPO: DaysumOps/daysum-dev-ops
+      TARGET_BRANCH: dev
+      TARGET_REQUIREMENTS_FILE: requirements.txt
+      PUBLISHED_PACKAGE_NAME: odoo-addon-${{ github.event.repository.name }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build whool
+
+    - name: Validate release tag
+      if: github.event_name == 'release'
+      env:
+        TAG_NAME: ${{ github.event.release.tag_name }}
+      run: |
+        python << 'PY'
+        import os, sys
+        from packaging.version import InvalidVersion, Version
+        tag = os.environ["TAG_NAME"].strip()
+        if not tag:
+            print("::error::release.tag_name is empty")
+            sys.exit(1)
+        version = tag[1:] if tag.startswith("v") else tag
+        if not version:
+            print("::error::Tag must not be only a bare 'v'")
+            sys.exit(1)
+        try:
+            Version(version)
+        except InvalidVersion as e:
+            print(f"::error::Tag must be a valid PEP 440 version (optional leading 'v', e.g. v16.0.1.2.0). Got {tag!r} — {e}")
+            sys.exit(1)
+        if len(version.split(".")) < 5:
+            print(f"::error::Version must have at least five dot-separated segments (Odoo addon / manifestoo). After stripping a leading 'v', got {version!r}")
+            sys.exit(1)
+        print(f"Validated release tag {tag!r} -> package version {version!r}")
+        PY
+
+    - name: Extract version
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "release" ]]; then
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION=${VERSION#v}
+        else
+          VERSION=$(python -c "import re; print(re.search(r\"'version'\\\\s*:\\\\s*'([^']+)'\", open('__manifest__.py').read()).group(1))")
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Release Version: $VERSION"
+
+    - name: Generate pyproject.toml if not present
+      run: |
+        if [ ! -f pyproject.toml ]; then
+          ADDON_NAME="${{ github.event.repository.name }}"
+          cat > pyproject.toml << 'PYEOF'
+[build-system]
+requires = ["setuptools>=45", "wheel", "whool"]
+build-backend = "whool.buildapi"
+
+[tool.whool]
+addon-dir = "."
+PYEOF
+          echo "Generated pyproject.toml for $ADDON_NAME"
+        else
+          echo "pyproject.toml already exists"
+        fi
+
+    - name: Build package
+      run: |
+        echo "Building package..."
+        python -m build
+        echo "Build completed."
+        ls -la dist/
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION || 'us-east-2' }}
+
+    - name: Publish to AWS CodeArtifact
+      env:
+        CA_DOMAIN: daysum
+        CA_REPO: odoo-pypi
+        AWS_ACCOUNT_ID: "851725548528"
+      run: |
+        echo "Version: ${{ steps.version.outputs.version }}"
+        ls -la dist/
+        shopt -s nullglob; w=(dist/*.whl); s=(dist/*.tar.gz)
+        if [ ${#w[@]} -eq 0 ]; then echo "::error::No wheel in dist/"; exit 1; fi
+        if [ ${#s[@]} -eq 0 ]; then echo "::error::No sdist in dist/"; exit 1; fi
+        pip install twine
+        aws codeartifact login --tool twine \
+          --domain "$CA_DOMAIN" \
+          --domain-owner "$AWS_ACCOUNT_ID" \
+          --repository "$CA_REPO"
+        twine upload --repository codeartifact dist/* --verbose
+        echo "CodeArtifact publish completed."
+
+    - name: Verify package
+      run: |
+        echo "Confirming package version in CodeArtifact..."
+        aws codeartifact list-package-versions \
+          --domain daysum \
+          --domain-owner 851725548528 \
+          --repository odoo-pypi \
+          --format pypi \
+          --package ${{ env.PUBLISHED_PACKAGE_NAME }} \
+          --max-results 5 \
+          --output table
+        WHEEL_FILE=$(ls dist/*.whl | head -1 | xargs basename)
+        pip install "dist/$WHEEL_FILE" --dry-run --no-deps || {
+          echo "Wheel dry-run failed!"
+          exit 1
+        }
+        echo "Verification completed."
+
+    - name: Checkout target requirements repo
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.TARGET_REPO }}
+        ref: ${{ env.TARGET_BRANCH }}
+        token: ${{ secrets.MONOREPO_SYNC_TOKEN }}
+        path: target-repo
+
+    - name: Update package version in target requirements
+      env:
+        PACKAGE_NAME: ${{ env.PUBLISHED_PACKAGE_NAME }}
+        PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        REQUIREMENTS_FILE: target-repo/${{ env.TARGET_REQUIREMENTS_FILE }}
+      run: |
+        python << 'PY'
+        from pathlib import Path
+        import re, sys
+        requirements_file = Path("$REQUIREMENTS_FILE")
+        package_name = "$PACKAGE_NAME"
+        package_version = "$PACKAGE_VERSION"
+        target_line = f"{package_name}=={package_version}"
+        if not requirements_file.exists():
+            print(f"::error::Requirements file not found: {requirements_file}")
+            sys.exit(1)
+        lines = requirements_file.read_text(encoding="utf-8").splitlines()
+        changed = False
+        matched = False
+        exact_pattern = re.compile(rf"^\s*{re.escape(package_name)}\s*(==|>=|<=|~=|!=|>|<).*$", re.IGNORECASE)
+        new_lines = []
+        for line in lines:
+            if exact_pattern.match(line):
+                matched = True
+                if line.strip() != target_line:
+                    new_lines.append(target_line)
+                    changed = True
+                else:
+                    new_lines.append(line)
+                continue
+            new_lines.append(line)
+        if not matched:
+            if new_lines and new_lines[-1].strip():
+                new_lines.append("")
+            new_lines.append(target_line)
+            changed = True
+        if changed:
+            requirements_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            print(f"Updated {requirements_file} with: {target_line}")
+        else:
+            print("No requirements update needed.")
+        PY
+
+    - name: Commit and push requirements update
+      working-directory: target-repo
+      env:
+        PACKAGE_NAME: ${{ env.PUBLISHED_PACKAGE_NAME }}
+        PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        if git diff --quiet -- "${{ env.TARGET_REQUIREMENTS_FILE }}"; then
+          echo "No change to commit"
+          exit 0
+        fi
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add "${{ env.TARGET_REQUIREMENTS_FILE }}"
+        git commit -m "chore: bump ${PACKAGE_NAME} to ${PACKAGE_VERSION}"
+        git push origin "${{ env.TARGET_BRANCH }}"
