@@ -86,9 +86,13 @@ jobs:
       run: |
         if [ ! -f setup.py ]; then
           ADDON_NAME="${{ github.event.repository.name }}"
-          export PACKAGE_NAME="odoo-addon-$(echo "$ADDON_NAME" | tr '_' '-')"
-          echo 'aW1wb3J0IG9zLCByZQpmcm9tIHNldHVwdG9vbHMgaW1wb3J0IHNldHVwCgpkZWYgZ2V0X3ZlcnNpb24oKToKICAgIG1hbmlmZXN0ID0gb3MucGF0aC5qb2luKG9zLnBhdGguZGlybmFtZShfX2ZpbGVfXyksICdfX21hbmlmZXN0X18ucHknKQogICAgd2l0aCBvcGVuKG1hbmlmZXN0KSBhcyBmOgogICAgICAgIGNvbnRlbnQgPSBmLnJlYWQoKQogICAgbSA9IHJlLnNlYXJjaChyIid2ZXJzaW9uJ1xzKjpccyonKFteJ10rKSciLCBjb250ZW50KQogICAgaWYgbm90IG06CiAgICAgICAgcmV0dXJuICcxNi4wLjEuMC4wJwogICAgdmVyID0gbS5ncm91cCgxKQogICAgcGFydHMgPSB2ZXIuc3BsaXQoJy4nKQogICAgd2hpbGUgbGVuKHBhcnRzKSA8IDU6CiAgICAgICAgcGFydHMuYXBwZW5kKCcwJykKICAgIHJldHVybiAnLicuam9pbihwYXJ0c1s6NV0pCgpzZXR1cCgKICAgIG5hbWU9b3MuZW52aXJvbi5nZXQoJ1BBQ0tBR0VfTkFNRScsICdvZG9vLWFkZG9uLXVua25vd24nKSwKICAgIHZlcnNpb249Z2V0X3ZlcnNpb24oKSwKICAgIHBhY2thZ2VzPVtdLAogICAgaW5jbHVkZV9wYWNrYWdlX2RhdGE9VHJ1ZSwKICAgIHppcF9zYWZlPUZhbHNlLAopCg==' | base64 -d > setup.py
-          echo "Generated setup.py for $ADDON_NAME"
+          PACKAGE_NAME="odoo-addon-$(echo "$ADDON_NAME" | tr '_' '-')"
+          # Generate setup.py with hardcoded package name
+          BASE64='aW1wb3J0IG9zLCByZQpmcm9tIHNldHVwdG9vbHMgaW1wb3J0IHNldHVwCgpkZWYgZ2V0X3ZlcnNpb24oKToKICAgIG1hbmlmZXN0ID0gb3MucGF0aC5qb2luKG9zLnBhdGguZGlybmFtZShfX2ZpbGVfXyksICdfX21hbmlmZXN0X18ucHknKQogICAgd2l0aCBvcGVuKG1hbmlmZXN0KSBhcyBmOgogICAgICAgIGNvbnRlbnQgPSBmLnJlYWQoKQogICAgbSA9IHJlLnNlYXJjaChyIid2ZXJzaW9uJ1xzKjpccyonKFteJ10rKSciLCBjb250ZW50KQogICAgaWYgbm90IG06CiAgICAgICAgcmV0dXJuICcxNi4wLjEuMC4wJwogICAgdmVyID0gbS5ncm91cCgxKQogICAgcGFydHMgPSB2ZXIuc3BsaXQoJy4nKQogICAgd2hpbGUgbGVuKHBhcnRzKSA8IDU6CiAgICAgICAgcGFydHMuYXBwZW5kKCcwJykKICAgIHJldHVybiAnLicuam9pbihwYXJ0c1s6NV0pCgpzZXR1cCgKICAgIG5hbWU9J3tQQUNLQUdFX05BTUV9JywKICAgIHZlcnNpb249Z2V0X3ZlcnNpb24oKSwKICAgIHBhY2thZ2VzPVtdLAogICAgaW5jbHVkZV9wYWNrYWdlX2RhdGE9VHJ1ZSwKICAgIHppcF9zYWZlPUZhbHNlLAopCg=='
+          echo "$BASE64" | sed "s/{PACKAGE_NAME}/$PACKAGE_NAME/g" | base64 -d > setup.py
+          # MANIFEST.in ensures __manifest__.py and all addon files are included in sdist
+          printf '%s\n' 'include __manifest__.py' 'include __init__.py' 'include hooks.py' 'graft models' 'graft views' 'graft wizard' 'graft report' 'graft security' 'graft data' 'graft static' 'graft i18n' 'graft tests' 'graft migrations' 'global-exclude *.pyc' > MANIFEST.in
+          echo "Generated setup.py and MANIFEST.in for $ADDON_NAME"
         else
           echo "setup.py already exists"
         fi
