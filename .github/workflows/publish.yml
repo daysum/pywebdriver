@@ -65,6 +65,23 @@ jobs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Release Version: $VERSION"
 
+    - name: Update version in manifest files
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        # Update __init__.py if it has __version__
+        if grep -q "__version__" __init__.py 2>/dev/null; then
+          sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION\"/" __init__.py
+          echo "Updated __init__.py"
+        fi
+        # Update pyproject.toml if present
+        if [ -f pyproject.toml ]; then
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          echo "Updated pyproject.toml"
+        fi
+        # Update __manifest__.py
+        sed -i "s/'version'[[:space:]]*:[[:space:]]*'[^']*'/'version': '$VERSION'/" __manifest__.py
+        echo "Updated __manifest__.py to $VERSION"
+
     - name: Generate build files if not present
       run: |
         if [ ! -f setup.py ]; then
