@@ -75,14 +75,12 @@ jobs:
       run: |
         if [ ! -f pyproject.toml ]; then
           ADDON_NAME="${{ github.event.repository.name }}"
-          cat > pyproject.toml << 'PYEOF'
-[build-system]
-requires = ["setuptools>=45", "wheel", "whool"]
-build-backend = "whool.buildapi"
-
-[tool.whool]
-addon-dir = "."
-PYEOF
+          printf '%s\n' '[build-system]' \
+            'requires = ["setuptools>=45", "wheel", "whool"]' \
+            'build-backend = "whool.buildapi"' \
+            '' \
+            '[tool.whool]' \
+            'addon-dir = "."' > pyproject.toml
           echo "Generated pyproject.toml for $ADDON_NAME"
         else
           echo "pyproject.toml already exists"
