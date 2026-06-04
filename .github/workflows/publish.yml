@@ -90,7 +90,7 @@ jobs:
           ADDON_NAME="${{ github.event.repository.name }}"
           PACKAGE_NAME="odoo-addon-$(echo "$ADDON_NAME" | tr '_' '-')"
           SETUP_B64='aW1wb3J0IG9zLCByZQpmcm9tIHNldHVwdG9vbHMgaW1wb3J0IHNldHVwCgpkZWYgZ2V0X3ZlcnNpb24oKToKICAgIG1hbmlmZXN0ID0gb3MucGF0aC5qb2luKG9zLnBhdGguZGlybmFtZShfX2ZpbGVfXyksICdfX21hbmlmZXN0X18ucHknKQogICAgd2l0aCBvcGVuKG1hbmlmZXN0KSBhcyBmOgogICAgICAgIGNvbnRlbnQgPSBmLnJlYWQoKQogICAgbSA9IHJlLnNlYXJjaChyIid2ZXJzaW9uJ1xzKjpccyonKFteJ10rKSciLCBjb250ZW50KQogICAgaWYgbm90IG06CiAgICAgICAgcmV0dXJuICcxNi4wLjEuMC4wJwogICAgdmVyID0gbS5ncm91cCgxKQogICAgcGFydHMgPSB2ZXIuc3BsaXQoJy4nKQogICAgd2hpbGUgbGVuKHBhcnRzKSA8IDU6CiAgICAgICAgcGFydHMuYXBwZW5kKCcwJykKICAgIHJldHVybiAnLicuam9pbihwYXJ0c1s6NV0pCgpzZXR1cCgKICAgIG5hbWU9J3tQQUNLQUdFX05BTUV9JywKICAgIHZlcnNpb249Z2V0X3ZlcnNpb24oKSwKICAgIHBhY2thZ2VzPVtdLAogICAgaW5jbHVkZV9wYWNrYWdlX2RhdGE9VHJ1ZSwKICAgIHppcF9zYWZlPUZhbHNlLAopCg=='
-          echo "$SETUP_B64" | base64 -d | sed "s/{PACKAGE_NAME}/$PACKAGE_NAME/g" > setup.py
+          echo "$SETUP_B64" | sed "s/{PACKAGE_NAME}/$PACKAGE_NAME/g" | base64 -d > setup.py
           printf '%s\n' 'include __manifest__.py' 'include __init__.py' 'include hooks.py' 'graft models' 'graft views' 'graft wizard' 'graft report' 'graft security' 'graft data' 'graft static' 'graft i18n' 'graft tests' 'graft migrations' 'global-exclude *.pyc' > MANIFEST.in
           echo "Generated setup.py and MANIFEST.in for $ADDON_NAME"
         else
