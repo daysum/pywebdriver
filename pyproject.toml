@@ -1,0 +1,6 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "whool"]
+build-backend = "whool.buildapi"
+
+[tool.whool]
+addon-dir = "."
