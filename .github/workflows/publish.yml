@@ -4,15 +4,15 @@
 name: Build and Publish Addon to AWS CodeArtifact
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [development]
   workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     env:
       TARGET_REPO: DaysumOps/daysum-dev-ops
       TARGET_BRANCH: dev
@@ -29,43 +29,44 @@ jobs:
 
     - name: Install build dependencies
       run: |
-        pip install build
-
-    - name: Validate release tag
-      if: github.event_name == 'release'
-      env:
-        TAG_NAME: ${{ github.event.release.tag_name }}
-      run: |
-        python << 'PY'
-        import os, sys
-        tag = os.environ["TAG_NAME"].strip()
-        if not tag:
-            print("::error::release.tag_name is empty")
-            sys.exit(1)
-        version = tag[1:] if tag.startswith("v") else tag
-        if not version:
-            print("::error::Tag must not be only a bare 'v'")
-            sys.exit(1)
-        parts = version.split(".")
-        if len(parts) < 3:
-            print(f"::error::Version must have at least 3 dot-separated segments. Got {version!r}")
-            sys.exit(1)
-        print(f"Validated release tag {tag!r} -> package version {version!r}")
-        PY
+        pip install build whool
 
     - name: Extract version
       id: version
       run: |
-        if [[ "${{ github.event_name }}" == "release" ]]; then
-          VERSION="${{ github.event.release.tag_name }}"
-          VERSION=${VERSION#v}
-        else
-          VERSION=$(python -c "import re; print(re.search(r\"'version'\\\\s*:\\\\s*'([^']+)'\", open('__manifest__.py').read()).group(1))")
-        fi
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        VERSION=$(python -c "import re; print(re.search(r\"'version'\\s*:\\s*'([^']+)'\", open('__manifest__.py').read()).group(1))")
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
         echo "Release Version: $VERSION"
 
+    - name: Check if release exists
+      id: check_release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        VERSION="v${{ steps.version.outputs.version }}"
+        if gh release view "$VERSION" --repo "${{ github.repository }}" 2>/dev/null; then
+          echo "release_exists=true" >> "$GITHUB_OUTPUT"
+          echo "Release $VERSION already exists. Code released. Skipping build."
+        else
+          echo "release_exists=false" >> "$GITHUB_OUTPUT"
+          echo "Release $VERSION does not exist. Will create and publish."
+        fi
+
+    - name: Create release
+      if: steps.check_release.outputs.release_exists == 'false'
+      id: create_release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        VERSION="v${{ steps.version.outputs.version }}"
+        gh release create "$VERSION" --repo "${{ github.repository }}" \
+          --title "$VERSION" \
+          --generate-notes
+        echo "created=true" >> "$GITHUB_OUTPUT"
+        echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
+
     - name: Update version in all files
+      if: steps.check_release.outputs.release_exists == 'false'
       env:
         PACKAGE_VERSION: ${{ steps.version.outputs.version }}
       run: |
@@ -84,27 +85,25 @@ jobs:
         sed -i "s/'version'[[:space:]]*:[[:space:]]*'[^']*'/'version': '$VERSION'/" __manifest__.py
         echo "Updated __manifest__.py to $VERSION"
 
-    - name: Generate build files if not present
+    - name: Ensure legacy setup.py is removed (whool handles build)
+      if: steps.check_release.outputs.release_exists == 'false'
       run: |
-        if [ ! -f setup.py ]; then
-          ADDON_NAME="${{ github.event.repository.name }}"
-          PACKAGE_NAME="odoo-addon-$(echo "$ADDON_NAME" | tr '_' '-')"
-          SETUP_B64='aW1wb3J0IG9zLCByZQpmcm9tIHNldHVwdG9vbHMgaW1wb3J0IHNldHVwCgpkZWYgZ2V0X3ZlcnNpb24oKToKICAgIG1hbmlmZXN0ID0gb3MucGF0aC5qb2luKG9zLnBhdGguZGlybmFtZShfX2ZpbGVfXyksICdfX21hbmlmZXN0X18ucHknKQogICAgd2l0aCBvcGVuKG1hbmlmZXN0KSBhcyBmOgogICAgICAgIGNvbnRlbnQgPSBmLnJlYWQoKQogICAgbSA9IHJlLnNlYXJjaChyIid2ZXJzaW9uJ1xzKjpccyonKFteJ10rKSciLCBjb250ZW50KQogICAgaWYgbm90IG06CiAgICAgICAgcmV0dXJuICcxNi4wLjEuMC4wJwogICAgdmVyID0gbS5ncm91cCgxKQogICAgcGFydHMgPSB2ZXIuc3BsaXQoJy4nKQogICAgd2hpbGUgbGVuKHBhcnRzKSA8IDU6CiAgICAgICAgcGFydHMuYXBwZW5kKCcwJykKICAgIHJldHVybiAnLicuam9pbihwYXJ0c1s6NV0pCgpzZXR1cCgKICAgIG5hbWU9J3tQQUNLQUdFX05BTUV9JywKICAgIHZlcnNpb249Z2V0X3ZlcnNpb24oKSwKICAgIHBhY2thZ2VzPVtdLAogICAgaW5jbHVkZV9wYWNrYWdlX2RhdGE9VHJ1ZSwKICAgIHppcF9zYWZlPUZhbHNlLAopCg=='
-          echo "$SETUP_B64" | sed "s/{PACKAGE_NAME}/$PACKAGE_NAME/g" | base64 -d > setup.py
-          printf '%s\n' 'include __manifest__.py' 'include __init__.py' 'include hooks.py' 'graft models' 'graft views' 'graft wizard' 'graft report' 'graft security' 'graft data' 'graft static' 'graft i18n' 'graft tests' 'graft migrations' 'global-exclude *.pyc' > MANIFEST.in
-          echo "Generated setup.py and MANIFEST.in for $ADDON_NAME"
-        else
-          echo "setup.py already exists"
+        if [ -f setup.py ]; then
+          rm setup.py MANIFEST.in 2>/dev/null || true
+          echo "Removed legacy setup.py and MANIFEST.in (whool builds from pyproject.toml)"
         fi
 
-    - name: Build package
+    - name: Clean dist and build
+      if: steps.check_release.outputs.release_exists == 'false'
       run: |
+        rm -rf dist/
         echo "Building package..."
-        python -m build
+        WHOOL_POST_VERSION_STRATEGY_OVERRIDE=none python -m build
         echo "Build completed."
         ls -la dist/
 
     - name: Configure AWS credentials
+      if: steps.check_release.outputs.release_exists == 'false'
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -112,6 +111,7 @@ jobs:
         aws-region: ${{ secrets.AWS_REGION || 'us-east-2' }}
 
     - name: Publish to AWS CodeArtifact
+      if: steps.check_release.outputs.release_exists == 'false'
       env:
         CA_DOMAIN: daysum
         CA_REPO: odoo-pypi
@@ -131,6 +131,7 @@ jobs:
         echo "CodeArtifact publish completed."
 
     - name: Verify package
+      if: steps.check_release.outputs.release_exists == 'false'
       run: |
         echo "Confirming package version in CodeArtifact..."
         aws codeartifact list-package-versions \
@@ -149,6 +150,7 @@ jobs:
         echo "Verification completed."
 
     - name: Checkout target requirements repo
+      if: steps.check_release.outputs.release_exists == 'false'
       uses: actions/checkout@v4
       with:
         repository: ${{ env.TARGET_REPO }}
@@ -157,6 +159,7 @@ jobs:
         path: target-repo
 
     - name: Update package version in target requirements
+      if: steps.check_release.outputs.release_exists == 'false'
       env:
         PACKAGE_NAME: ${{ env.PUBLISHED_PACKAGE_NAME }}
         PACKAGE_VERSION: ${{ steps.version.outputs.version }}
@@ -200,6 +203,7 @@ jobs:
         PY
 
     - name: Commit and push requirements update
+      if: steps.check_release.outputs.release_exists == 'false'
       working-directory: target-repo
       env:
         PACKAGE_NAME: ${{ env.PUBLISHED_PACKAGE_NAME }}
@@ -214,3 +218,11 @@ jobs:
         git add "${{ env.TARGET_REQUIREMENTS_FILE }}"
         git commit -m "chore: bump ${PACKAGE_NAME} to ${PACKAGE_VERSION}"
         git push origin "${{ env.TARGET_BRANCH }}"
+
+    - name: Cleanup - delete release on pipeline failure
+      if: failure() && steps.create_release.outputs.created == 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release delete "${{ steps.create_release.outputs.tag }}" --repo "${{ github.repository }}" --yes
+        echo "Deleted release ${{ steps.create_release.outputs.tag }} due to pipeline failure"
