@@ -2,5 +2,12 @@
 requires = ["setuptools>=45", "wheel", "whool"]
 build-backend = "whool.buildapi"
 
+[project]
+name = "odoo-addon-pywebdriver"
+version = "16.0.0.0.1"
+description = "Odoo addon pywebdriver (Private Package)"
+license = {text = "OPL-1"}
+requires-python = ">=3.8"
+
 [tool.whool]
 addon-dir = "."
