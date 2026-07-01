@@ -69,6 +69,9 @@ Point of Sale with PyWebDriver as a Proxy.
       - 8213: Mettler Toledo Ariva-S
       - No decimals: Mettler Toledo BC, Baxtran TW/VW
       - MT SICS Commandset Toledo scales such as **Mettler-Toledo JE5002G, Mettler-Toledo JL602GE** using [toledo_sics] protocol in config
+  - **RFID Reader**:
+    - Odoo Stock Check bridge endpoint for Zebra or reader services that emit
+      line-delimited EPC values through simulator, file, serial, or TCP line streams
   - **Barcode Reader**:
     - They are usually recognized as keyboards and do not need pywebdriver to function
   - **Cash Box** :
@@ -235,6 +238,7 @@ If not, default drivers will be loaded:
 - display_driver
 - escpos_driver
 - serial_driver
+- rfid_driver
 - signature_driver
 - telium_driver
 - opcua_driver
@@ -257,6 +261,123 @@ sslcert=cert.pem
 sslkey=privkey.pem
 
 ```
+
+#### <a name="rfid-bridge"></a>RFID bridge for Odoo Stock Check
+
+The `rfid_driver` plugin exposes a PyWebDriver-compatible RFID endpoint for Odoo
+Stock Check:
+
+```
+POST /hw_proxy/rfid_read
+```
+
+Request body:
+
+```json
+{"cursor": "0"}
+```
+
+Response body:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "info": "ok",
+    "cursor": "2",
+    "has_more": false,
+    "tags": [
+      {"epc": "E2000017221101441890ABCD"}
+    ]
+  }
+}
+```
+
+EPC values are normalized by removing whitespace/common separators, uppercasing,
+and limiting values to 128 characters. Responses are bounded by
+`max_tags_per_poll` (default `200`) and backed by a bounded in-memory event
+buffer (`max_buffer_events`, default `10000`) so hardware reads never block the
+HTTP request.
+
+Enable the driver in `config.ini`:
+
+```ini
+[application]
+drivers=odoo8,cups_driver,rfid_driver
+
+[rfid_driver]
+mode=disabled
+max_tags_per_poll=200
+max_buffer_events=10000
+```
+
+Supported modes:
+
+- `disabled`: endpoint is active but returns an empty successful tag batch.
+- `simulator`: use `simulator_tags` or POST `tags` for local testing.
+- `file`: tail a file where each line is an EPC.
+- `serial`: read line-delimited EPCs from a serial/COM port.
+- `tcp_line`: read line-delimited EPCs from a TCP socket.
+
+Simulator example:
+
+```ini
+[rfid_driver]
+mode=simulator
+simulator_tags=E2000017221101441890ABCD,300833B2DDD9014000000001
+```
+
+You can inject simulator tags without restarting:
+
+```bash
+curl -X POST http://localhost:8069/hw_proxy/rfid_read \
+  -H "Content-Type: application/json" \
+  -d "{\"cursor\":\"0\",\"tags\":[\"E2 00-0017-2211-0144-1890-ABCD\"]}"
+```
+
+Serial example:
+
+```ini
+[rfid_driver]
+mode=serial
+port=COM9
+baudrate=9600
+bytesize=8
+parity=N
+stopbits=1
+read_timeout=0.2
+```
+
+TCP line-stream example:
+
+```ini
+[rfid_driver]
+mode=tcp_line
+host=127.0.0.1
+port=5084
+connect_timeout=2
+read_timeout=0.2
+```
+
+File-tail example:
+
+```ini
+[rfid_driver]
+mode=file
+file_path=C:\pywebdriver\rfid-tags.log
+file_start_at_end=true
+```
+
+Zebra setup depends on the reader model and middleware. Configure the Zebra SDK,
+DataWedge, FX Connect, or a small vendor service to emit one EPC per line to the
+selected file, serial port, or TCP socket. A future vendor-specific adapter can
+feed the same internal event buffer without changing the Odoo endpoint contract.
+
+When Odoo is opened over HTTPS, browsers block calls to an HTTP local bridge as
+mixed content. Configure PyWebDriver SSL (`sslcert` and `sslkey`) and trust the
+local certificate, or use another trusted local HTTPS proxy. Also keep
+`cors_origins` aligned with your Odoo origin, or use `*` only for controlled
+local workstation deployments.
 
 ## <a name="development"></a>Development
 
